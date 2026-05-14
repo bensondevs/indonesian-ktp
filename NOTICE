@@ -1,0 +1,13 @@
+Wilayah data (data/wilayah.php)
+================================
+
+The file `data/wilayah.php` is **bundled** with this package as compiled PHP
+data derived from the Indonesian administrative region project:
+
+  https://github.com/cahyadsn/wilayah
+
+Original work: Copyright (c) cahya dsn; licensed under the MIT License.
+See the header in the upstream `db/wilayah.sql` for the full license text.
+
+The compiled PHP file contains only province, regency/kabupaten/kota, and
+kecamatan rows (desa/kelurahan are omitted) for use in NIK wilayah validation.
