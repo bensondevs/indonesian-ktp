@@ -12,16 +12,26 @@ use Illuminate\Contracts\Foundation\Application;
 
 final class KTP
 {
+    private static ?FileRegionHierarchyLookup $fallbackLookup = null;
+
     public static function nik(string $raw): Query
     {
         $evaluatedAt = Carbon::now();
 
-        if (function_exists('app') && app() instanceof Application && app()->bound(RegionHierarchyLookup::class)) {
-            return new Query($raw, $evaluatedAt, false, app(RegionHierarchyLookup::class));
+        if (function_exists('app')) {
+            $app = app();
+            if ($app instanceof Application && $app->bound(RegionHierarchyLookup::class)) {
+                return new Query($raw, $evaluatedAt, false, $app->make(RegionHierarchyLookup::class));
+            }
         }
 
-        $dataPath = dirname(__DIR__) . '/data/wilayah.php';
+        return new Query($raw, $evaluatedAt, false, self::fallbackLookup());
+    }
 
-        return new Query($raw, $evaluatedAt, false, new FileRegionHierarchyLookup($dataPath));
+    private static function fallbackLookup(): FileRegionHierarchyLookup
+    {
+        return self::$fallbackLookup ??= new FileRegionHierarchyLookup(
+            dirname(__DIR__) . '/data/wilayah.php',
+        );
     }
 }

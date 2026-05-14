@@ -8,7 +8,6 @@ use Bensondevs\IndonesianKtp\Gender;
 use Bensondevs\IndonesianKtp\Support\TwoDigitYearExpander;
 use Carbon\Carbon;
 use Carbon\CarbonInterface;
-use Illuminate\Support\Stringable;
 
 final class Parser
 {
@@ -19,7 +18,7 @@ final class Parser
     public static function parse(string $raw, CarbonInterface $evaluatedAt, bool $usePivotForYearResolution = false): Parsed
     {
         $nik = self::normalizedNikDigits($raw);
-        if (blank($nik)) {
+        if ($nik === null) {
             return Parsed::invalid($raw);
         }
 
@@ -60,24 +59,24 @@ final class Parser
         );
     }
 
-    private static function normalizedNikDigits(string $raw): ?Stringable
+    private static function normalizedNikDigits(string $raw): ?string
     {
-        $nik = str($raw)->replaceMatches('/\D/', '');
+        $digits = preg_replace('/\D/', '', $raw) ?? '';
 
-        return $nik->test('/^\d{16}$/') ? $nik : null;
+        return strlen($digits) === 16 ? $digits : null;
     }
 
     /**
      * @return array{districtCode: string, dayField: int, month: int, yy: int, serial: int}
      */
-    private static function structuralPartsFromNik(Stringable $nik): array
+    private static function structuralPartsFromNik(string $nik): array
     {
         return [
-            'districtCode' => collect(str_split($nik->substr(0, 6)->value(), 2))->implode('.'),
-            'dayField' => (int) $nik->substr(6, 2)->value(),
-            'month' => (int) $nik->substr(8, 2)->value(),
-            'yy' => (int) $nik->substr(10, 2)->value(),
-            'serial' => (int) $nik->substr(12, 4)->value(),
+            'districtCode' => substr($nik, 0, 2) . '.' . substr($nik, 2, 2) . '.' . substr($nik, 4, 2),
+            'dayField' => (int) substr($nik, 6, 2),
+            'month' => (int) substr($nik, 8, 2),
+            'yy' => (int) substr($nik, 10, 2),
+            'serial' => (int) substr($nik, 12, 4),
         ];
     }
 
@@ -134,21 +133,18 @@ final class Parser
     ): Parsed {
         $years = TwoDigitYearExpander::candidateBirthYearsForAmbiguousNik($yy, $month, $day, $evaluatedAt);
 
-        if (blank($years)) {
+        if ($years === []) {
             return Parsed::invalid($raw);
         }
 
-        $sortedCandidates = collect($years)
-            ->map(static fn (int $year): CarbonInterface => Carbon::createMidnightDate($year, $month, $day))
-            ->sortBy(static fn (CarbonInterface $d): int => $d->getTimestamp())
-            ->values();
-
-        $candidates = $sortedCandidates->all();
-        $birthDate = $sortedCandidates->count() === 1 ? $sortedCandidates->first() : null;
+        $candidates = [];
+        foreach ($years as $year) {
+            $candidates[] = Carbon::createMidnightDate($year, $month, $day);
+        }
 
         return Parsed::valid($raw, [
             'districtCode' => $districtCode,
-            'birthDate' => $birthDate,
+            'birthDate' => count($candidates) === 1 ? $candidates[0] : null,
             'birthDateCandidates' => $candidates,
             'gender' => $gender,
             'serial' => $serial,

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Bensondevs\IndonesianKtp\NIK;
 
 use Bensondevs\IndonesianKtp\Gender;
-use Bensondevs\IndonesianKtp\Regions\Data\RegionHierarchy;
 use Bensondevs\IndonesianKtp\Regions\Lookup\RegionHierarchyLookup;
 use Bensondevs\IndonesianKtp\Regions\Matching\NikRegionMatcher;
 use Carbon\Carbon;
@@ -14,6 +13,8 @@ use Carbon\CarbonInterface;
 final class Query
 {
     private ?Carbon $expectedBirth = null;
+
+    private bool $expectedBirthInvalidInput = false;
 
     private ?Gender $expectedGender = null;
 
@@ -27,12 +28,28 @@ final class Query
 
     private ?int $expectedMinAge = null;
 
+    private ?Parsed $parsedCache = null;
+
     public function __construct(
         private readonly string $raw,
         private readonly CarbonInterface $evaluatedAt,
         private readonly bool $usePivotForYearResolution,
         private readonly RegionHierarchyLookup $regionHierarchyLookup,
     ) {}
+
+    public function __clone(): void
+    {
+        $this->parsedCache = null;
+    }
+
+    private function parseRaw(): Parsed
+    {
+        return $this->parsedCache ??= Parser::parse(
+            $this->raw,
+            $this->evaluatedAt,
+            $this->usePivotForYearResolution,
+        );
+    }
 
     /**
      * Pin two-digit year resolution to a pivot instant (legacy reference-date behaviour).
@@ -45,7 +62,9 @@ final class Query
     public function expectBirthDate(CarbonInterface | string $value): self
     {
         $clone = clone $this;
-        $clone->expectedBirth = NikRegionMatcher::parseExpectedDate($value);
+        $parsed = NikRegionMatcher::parseExpectedDate($value);
+        $clone->expectedBirth = $parsed;
+        $clone->expectedBirthInvalidInput = $parsed === null;
 
         return $clone;
     }
@@ -159,23 +178,22 @@ final class Query
 
     public function matchBirthDate(CarbonInterface | string $value): bool
     {
-        $parsed = Parser::parse($this->raw, $this->evaluatedAt, $this->usePivotForYearResolution);
+        $expectedDate = NikRegionMatcher::parseExpectedDate($value);
+        if ($expectedDate === null) {
+            return false;
+        }
 
-        return $parsed->birthDateEqualsDate($value);
+        return $this->parseRaw()->birthDateEqualsDate($expectedDate);
     }
 
     public function matchGender(Gender | string $value): bool
     {
-        $parsed = Parser::parse($this->raw, $this->evaluatedAt, $this->usePivotForYearResolution);
-
-        return $parsed->genderEquals($value);
+        return $this->parseRaw()->genderEquals($value);
     }
 
     public function matchAge(int $years): bool
     {
-        $parsed = Parser::parse($this->raw, $this->evaluatedAt, $this->usePivotForYearResolution);
-
-        return $parsed->ageEquals($years, $this->evaluatedAt);
+        return $this->parseRaw()->ageEquals($years, $this->evaluatedAt);
     }
 
     public function matchAtLeastYears(int $minYears): bool
@@ -184,9 +202,7 @@ final class Query
             return false;
         }
 
-        $parsed = Parser::parse($this->raw, $this->evaluatedAt, $this->usePivotForYearResolution);
-
-        return $parsed->isAtLeastYears($minYears, $this->evaluatedAt);
+        return $this->parseRaw()->isAtLeastYears($minYears, $this->evaluatedAt);
     }
 
     public function matchSeventeenOrOlder(): bool
@@ -204,6 +220,9 @@ final class Query
         return $this->parsed()->age($this->evaluatedAt);
     }
 
+    /**
+     * @deprecated Use {@see matchAtLeastYears()} instead.
+     */
     public function isAtLeastYears(int $minYears): bool
     {
         return $this->matchAtLeastYears($minYears);
@@ -216,7 +235,7 @@ final class Query
 
     public function validate(): ValidationResult
     {
-        $parsed = Parser::parse($this->raw, $this->evaluatedAt, $this->usePivotForYearResolution);
+        $parsed = $this->parseRaw();
         $matcher = new NikRegionMatcher($this->regionHierarchyLookup);
         $structureValid = $parsed->structureValid();
         $districtCode = $parsed->districtCode();
@@ -225,16 +244,20 @@ final class Query
             ? $this->regionHierarchyLookup->hierarchy($districtCode)
             : null;
 
+        $birthExpectationSet = $this->expectedBirth !== null || $this->expectedBirthInvalidInput;
+
         return new ValidationResult(
             hasValidStructure: $structureValid,
-            hasValidRegionHierarchy: $this->hierarchyIsComplete($hierarchy),
-            hasValidBirthDate: blank($this->expectedBirth)
-                ? null
-                : ($structureValid && $parsed->birthDateEqualsDate($this->expectedBirth)),
-            hasValidGender: blank($this->expectedGender)
+            hasValidRegionHierarchy: filled($hierarchy),
+            hasValidBirthDate: ! $birthExpectationSet
                 ? null
                 : ($structureValid
-                    && filled($parsed->gender())
+                    && $this->expectedBirth !== null
+                    && $parsed->birthDateEqualsDate($this->expectedBirth)),
+            hasValidGender: $this->expectedGender === null
+                ? null
+                : ($structureValid
+                    && $parsed->gender() !== null
                     && $parsed->gender() === $this->expectedGender),
             hasValidProvince: blank($this->expectedProvince)
                 ? null
@@ -254,14 +277,9 @@ final class Query
         );
     }
 
-    private function hierarchyIsComplete(?RegionHierarchy $hierarchy): bool
-    {
-        return filled($hierarchy);
-    }
-
     public function parsed(): Parsed
     {
-        $parsed = Parser::parse($this->raw, $this->evaluatedAt, $this->usePivotForYearResolution);
+        $parsed = $this->parseRaw();
 
         if (! $parsed->structureValid()) {
             return $parsed;

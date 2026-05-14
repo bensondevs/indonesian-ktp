@@ -23,14 +23,14 @@ final class FileRegionHierarchyLookup implements RegionHierarchyLookup
     /** @var array<string, array{code: string, regency_code: string, name: string}>|null */
     private ?array $districtByCode = null;
 
-    /** @var list<array{code: string, name: string}>|null */
-    private ?array $provinceList = null;
+    /** @var array<string, string>|null  Normalized name => province code */
+    private ?array $provinceCodeByNormalizedName = null;
 
-    /** @var list<array{code: string, province_code: string, name: string}>|null */
-    private ?array $regencyList = null;
+    /** @var array<string, list<string>>|null  Normalized name => list of regency codes (multiple if names repeat) */
+    private ?array $regencyCodesByNormalizedName = null;
 
-    /** @var list<array{code: string, regency_code: string, name: string}>|null */
-    private ?array $districtList = null;
+    /** @var array<string, list<string>>|null  Normalized name => list of district codes */
+    private ?array $districtCodesByNormalizedName = null;
 
     public function __construct(
         private readonly string $dataFilePath,
@@ -56,9 +56,9 @@ final class FileRegionHierarchyLookup implements RegionHierarchyLookup
         }
 
         return new RegionHierarchy(
-            new RegionUnit((string) $province['code'], (string) $province['name']),
-            new RegionUnit((string) $regency['code'], (string) $regency['name']),
-            new RegionUnit((string) $district['code'], (string) $district['name']),
+            new RegionUnit($province['code'], $province['name']),
+            new RegionUnit($regency['code'], $regency['name']),
+            new RegionUnit($district['code'], $district['name']),
         );
     }
 
@@ -70,9 +70,18 @@ final class FileRegionHierarchyLookup implements RegionHierarchyLookup
             return null;
         }
 
-        foreach ($this->provinceList as $row) {
-            $normalizedName = $this->normalizeName($row['name']);
-            if ($normalizedName === $needle || str_contains($normalizedName, $needle) || str_contains($needle, $normalizedName)) {
+        $code = $this->provinceCodeByNormalizedName[$needle] ?? null;
+        if ($code !== null) {
+            return ['code' => $code, 'name' => $this->provinceByCode[$code]['name']];
+        }
+
+        $needleTokens = $this->meaningfulTokens($needle);
+        if ($needleTokens === []) {
+            return null;
+        }
+
+        foreach ($this->provinceByCode as $row) {
+            if ($this->nameTokensSubset($needleTokens, $row['name'])) {
                 return ['code' => $row['code'], 'name' => $row['name']];
             }
         }
@@ -88,12 +97,26 @@ final class FileRegionHierarchyLookup implements RegionHierarchyLookup
             return null;
         }
 
-        foreach ($this->regencyList as $row) {
+        $exactCodes = $this->regencyCodesByNormalizedName[$needle] ?? null;
+        if ($exactCodes !== null) {
+            foreach ($exactCodes as $code) {
+                $row = $this->regencyByCode[$code];
+                if (! filled($provinceCode) || $row['province_code'] === $provinceCode) {
+                    return ['code' => $row['code'], 'name' => $row['name']];
+                }
+            }
+        }
+
+        $needleTokens = $this->meaningfulTokens($needle);
+        if ($needleTokens === []) {
+            return null;
+        }
+
+        foreach ($this->regencyByCode as $row) {
             if (filled($provinceCode) && $row['province_code'] !== $provinceCode) {
                 continue;
             }
-            $normalizedName = $this->normalizeName($row['name']);
-            if ($normalizedName === $needle || str_contains($normalizedName, $needle) || str_contains($needle, $normalizedName)) {
+            if ($this->nameTokensSubset($needleTokens, $row['name'])) {
                 return ['code' => $row['code'], 'name' => $row['name']];
             }
         }
@@ -109,12 +132,26 @@ final class FileRegionHierarchyLookup implements RegionHierarchyLookup
             return null;
         }
 
-        foreach ($this->districtList as $row) {
+        $exactCodes = $this->districtCodesByNormalizedName[$needle] ?? null;
+        if ($exactCodes !== null) {
+            foreach ($exactCodes as $code) {
+                $row = $this->districtByCode[$code];
+                if (! filled($regencyCode) || $row['regency_code'] === $regencyCode) {
+                    return ['code' => $row['code'], 'name' => $row['name']];
+                }
+            }
+        }
+
+        $needleTokens = $this->meaningfulTokens($needle);
+        if ($needleTokens === []) {
+            return null;
+        }
+
+        foreach ($this->districtByCode as $row) {
             if (filled($regencyCode) && $row['regency_code'] !== $regencyCode) {
                 continue;
             }
-            $normalizedName = $this->normalizeName($row['name']);
-            if ($normalizedName === $needle || str_contains($normalizedName, $needle) || str_contains($needle, $normalizedName)) {
+            if ($this->nameTokensSubset($needleTokens, $row['name'])) {
                 return ['code' => $row['code'], 'name' => $row['name']];
             }
         }
@@ -124,7 +161,37 @@ final class FileRegionHierarchyLookup implements RegionHierarchyLookup
 
     private function normalizeName(string $name): string
     {
-        return mb_strtoupper(preg_replace('/\s+/u', ' ', trim($name)) ?? '');
+        return mb_strtoupper(trim(preg_replace('/\s+/u', ' ', $name) ?? ''));
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function meaningfulTokens(string $normalizedUpper): array
+    {
+        $tokens = [];
+        foreach (explode(' ', $normalizedUpper) as $token) {
+            if (strlen($token) >= 3) {
+                $tokens[] = $token;
+            }
+        }
+
+        return $tokens;
+    }
+
+    /**
+     * @param  list<string>  $needleTokens
+     */
+    private function nameTokensSubset(array $needleTokens, string $rowName): bool
+    {
+        $rowTokens = array_flip(explode(' ', $this->normalizeName($rowName)));
+        foreach ($needleTokens as $token) {
+            if (! isset($rowTokens[$token])) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function ensureLoaded(): void
@@ -134,28 +201,31 @@ final class FileRegionHierarchyLookup implements RegionHierarchyLookup
         }
 
         if (! is_file($this->dataFilePath)) {
-            throw new \RuntimeException('Region hierarchy data file not found: ' . $this->dataFilePath);
+            throw new \RuntimeException('Region hierarchy data file not found.');
         }
 
         /** @var array{provinces: list<array{code: string, name: string}>, regencies: list<array{code: string, province_code: string, name: string}>, districts: list<array{code: string, regency_code: string, name: string}>} $data */
         $data = require $this->dataFilePath;
 
         $this->provinceByCode = [];
-        $this->provinceList = $data['provinces'];
+        $this->provinceCodeByNormalizedName = [];
         foreach ($data['provinces'] as $row) {
             $this->provinceByCode[$row['code']] = $row;
+            $this->provinceCodeByNormalizedName[$this->normalizeName($row['name'])] = $row['code'];
         }
 
         $this->regencyByCode = [];
-        $this->regencyList = $data['regencies'];
+        $this->regencyCodesByNormalizedName = [];
         foreach ($data['regencies'] as $row) {
             $this->regencyByCode[$row['code']] = $row;
+            $this->regencyCodesByNormalizedName[$this->normalizeName($row['name'])][] = $row['code'];
         }
 
         $this->districtByCode = [];
-        $this->districtList = $data['districts'];
+        $this->districtCodesByNormalizedName = [];
         foreach ($data['districts'] as $row) {
             $this->districtByCode[$row['code']] = $row;
+            $this->districtCodesByNormalizedName[$this->normalizeName($row['name'])][] = $row['code'];
         }
     }
 }
