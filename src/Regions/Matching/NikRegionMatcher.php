@@ -163,9 +163,14 @@ final class NikRegionMatcher
 
     private function normalizedUpper(string $value): string
     {
-        return str($value)->trim()->upper()->value();
+        return mb_strtoupper(trim(preg_replace('/\s+/u', ' ', $value) ?? ''));
     }
 
+    /**
+     * Match by exact equality (case-insensitive) or token-based containment.
+     * Token-based: every expected token (≥3 chars) must appear as a token of actual name.
+     * Avoids the previous bi-directional `str_contains` that let 1–2 char inputs bypass validation.
+     */
     private function upperNamesFuzzyMatch(string $expected, string $actualName): bool
     {
         $expectedUpper = $this->normalizedUpper($expected);
@@ -175,13 +180,48 @@ final class NikRegionMatcher
             return false;
         }
 
-        return $expectedUpper === $actualNameUpper
-            || str($actualNameUpper)->contains($expectedUpper)
-            || str($expectedUpper)->contains($actualNameUpper);
+        if ($expectedUpper === $actualNameUpper) {
+            return true;
+        }
+
+        $expectedTokens = $this->meaningfulTokens($expectedUpper);
+        if ($expectedTokens === []) {
+            return false;
+        }
+
+        $actualTokens = explode(' ', $actualNameUpper);
+        $actualTokenSet = array_flip($actualTokens);
+
+        foreach ($expectedTokens as $token) {
+            if (! isset($actualTokenSet[$token])) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
-    public static function parseExpectedDate(CarbonInterface | string $value): Carbon
+    /**
+     * @return list<string>
+     */
+    private function meaningfulTokens(string $upperName): array
     {
-        return Carbon::parse($value)->startOfDay();
+        $tokens = [];
+        foreach (explode(' ', $upperName) as $token) {
+            if (strlen($token) >= 3) {
+                $tokens[] = $token;
+            }
+        }
+
+        return $tokens;
+    }
+
+    public static function parseExpectedDate(CarbonInterface | string $value): ?Carbon
+    {
+        try {
+            return Carbon::parse($value)->startOfDay();
+        } catch (\Throwable) {
+            return null;
+        }
     }
 }

@@ -182,15 +182,25 @@ final readonly class Parsed
 
     public function birthDateEqualsDate(CarbonInterface | string $other): bool
     {
-        if (! $this->structureValid || collect($this->birthDateCandidates)->isEmpty()) {
+        if (! $this->structureValid || $this->birthDateCandidates === []) {
             return false;
         }
 
-        $comparisonDate = Carbon::parse($other)->startOfDay();
+        try {
+            $comparisonDate = $other instanceof CarbonInterface
+                ? $other->copy()->startOfDay()
+                : Carbon::parse($other)->startOfDay();
+        } catch (\Throwable) {
+            return false;
+        }
 
-        return collect($this->birthDateCandidates)->contains(
-            static fn (CarbonInterface $candidate): bool => $candidate->isSameDay($comparisonDate),
-        );
+        foreach ($this->birthDateCandidates as $candidate) {
+            if ($candidate->isSameDay($comparisonDate)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function genderEquals(Gender | string $other): bool
@@ -228,9 +238,13 @@ final readonly class Parsed
             return false;
         }
 
-        return collect($this->birthDateCandidates)->every(
-            static fn (CarbonInterface $candidate): bool => self::candidateIsAtLeastYearsOld($candidate, $asOf, $minYears),
-        );
+        foreach ($this->birthDateCandidates as $candidate) {
+            if (! self::candidateIsAtLeastYearsOld($candidate, $asOf, $minYears)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     public function isSeventeenOrOlder(CarbonInterface $asOf): bool
@@ -264,13 +278,7 @@ final readonly class Parsed
             return 0;
         }
 
-        for ($n = 0; $n < 150; $n++) {
-            if ($asOf->lt($birth->copy()->addYears($n + 1))) {
-                return $n;
-            }
-        }
-
-        return 149;
+        return (int) $birth->copy()->startOfDay()->diffInYears($asOf->copy()->startOfDay());
     }
 
     /**
