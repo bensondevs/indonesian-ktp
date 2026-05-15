@@ -69,15 +69,13 @@ final readonly class ValidationResult
             return false;
         }
 
-        return collect([
-            $this->hasValidBirthDate,
-            $this->hasValidGender,
-            $this->hasValidProvince,
-            $this->hasValidRegency,
-            $this->hasValidSubdistrict,
-            $this->hasValidAge,
-            $this->hasValidMinimumAge,
-        ])->every(static fn (?bool $expectation): bool => $expectation !== false);
+        return $this->hasValidBirthDate !== false
+            && $this->hasValidGender !== false
+            && $this->hasValidProvince !== false
+            && $this->hasValidRegency !== false
+            && $this->hasValidSubdistrict !== false
+            && $this->hasValidAge !== false
+            && $this->hasValidMinimumAge !== false;
     }
 
     public function hasValidKabupaten(): ?bool

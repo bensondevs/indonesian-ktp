@@ -24,6 +24,9 @@ enum Gender: string
         };
     }
 
+    /**
+     * @deprecated Use the native `===` identity check on enum cases.
+     */
     public function same(Gender $other): bool
     {
         return $this === $other;
