@@ -10,6 +10,7 @@ Validate Indonesian NIK (*Nomor Induk Kependudukan*) with structural checks and 
 - [Quick start](#quick-start)
 - [Usage](#usage)
   - [Basic validation](#basic-validation)
+  - [Laravel Validator (rule object and ktp-nik)](#laravel-validator-rule-object-and-ktp-nik)
   - [Quick checks](#quick-checks)
   - [Expectations and aliases](#expectations-and-aliases)
   - [validate() and ValidationResult](#validate-and-validationresult)
@@ -47,7 +48,7 @@ KTP::nik('9999991501900001')->isValid(); // false — unknown district (no expec
 | Requirement | Notes |
 | --- | --- |
 | PHP | 8.3+ |
-| Laravel | 10–13; `illuminate/contracts`, `illuminate/database`, `illuminate/support` match your app |
+| Laravel | 10–13; `illuminate/contracts`, `illuminate/database`, `illuminate/support`, `illuminate/validation` match your app |
 | Carbon | `nesbot/carbon` ^2.67 or ^3.0 |
 
 ## Install 📦
@@ -72,6 +73,7 @@ Structure + region only until you add expectations (see [Usage](#usage)).
 
 - `KTP::nik($raw)` returns a fluent, **immutable** `Query`: each chained call is a new instance.
 - `isValid()` → one `bool`. `validate()` → [`ValidationResult`](src/NIK/ValidationResult.php) with per-flag detail.
+- Laravel’s [`Validator`](https://laravel.com/docs/validation) is supported via [`KtpNik`](src/Rules/KtpNik.php) and string rules registered in [`IndonesianKtpServiceProvider`](src/IndonesianKtpServiceProvider.php) — see [Laravel Validator (rule object and ktp-nik)](#laravel-validator-rule-object-and-ktp-nik).
 
 ```php
 use Bensondevs\IndonesianKtp\Gender;
@@ -89,6 +91,48 @@ use Bensondevs\IndonesianKtp\KTP;
 
 KTP::nik('3315131501901235')->isValid();
 ```
+
+### Laravel Validator (rule object and ktp-nik)
+
+With [package discovery](https://laravel.com/docs/packages#package-discovery), [`IndonesianKtpServiceProvider`](src/IndonesianKtpServiceProvider.php) registers translation lines and validation extensions automatically. You can validate request input either with a [rule object](https://laravel.com/docs/validation#using-rule-objects) or with a string rule.
+
+**Rule object vs string rule**
+
+```php
+use Bensondevs\IndonesianKtp\Rules\KtpNik;
+
+$request->validate([
+    'nik' => ['required', 'string', new KtpNik],
+]);
+
+// Equivalent string rule (underscore alias: ktp_nik)
+$request->validate([
+    'nik' => ['required', 'string', 'ktp-nik'],
+]);
+```
+
+**What this checks**
+
+| | |
+| --- | --- |
+| Same as | Plain `KTP::nik($value)->isValid()` — **structure** (length, digits, birth/gender segment rules) plus **complete wilayah hierarchy** for the district code. |
+| Does **not** include | Chained expectations such as `expectBirthDate`, `expectGender`, `expectProvince`, age rules, etc. For those, use the fluent `Query` API — [Expectations and aliases](#expectations-and-aliases). |
+
+**Composing with `required` / `nullable`**
+
+Use Laravel’s built-in rules for presence: `required|string|…` when the field must be present, or `nullable|string|…` when it is optional. The `KtpNik` rule **does not fail** on `null` or `''`, so optional fields stay easy to express without fighting the custom rule.
+
+**Input types**
+
+Integer or numeric string values are cast to string before validation. Arrays, objects, and booleans fail. In practice, pair the rule with Laravel’s `string` rule as in the examples above.
+
+**Messages and localization**
+
+The default English message lives under the `indonesian-ktp` namespace (`validation.ktp_nik`). Override or translate it like any vendor lang line (for example files under `lang/vendor/indonesian-ktp`). See [Laravel localization](https://laravel.com/docs/localization).
+
+**Custom wilayah data**
+
+If you rebind [`RegionHierarchyLookup`](src/Regions/Lookup/RegionHierarchyLookup.php), `KTP::nik()` uses it when the container is available — so these validator rules pick up the same lookup. See [Region hierarchy lookup](#region-hierarchy-lookup).
 
 ### Quick checks
 
@@ -388,17 +432,6 @@ Default NIK attribute name: `nik` (override `getIndonesianKtpNikColumn()`). Non-
 #### Explicit matchers
 
 Each `nik*Is($value)` method compares the **argument** to what is encoded or implied by the NIK. Extra attributes on the model are ignored unless you pass them in. Each short name has a long alias (`indonesianIdNumber*Is`) for consistency with the rest of the package.
-
-**Migration from older releases** (removed implicit `*MatchesNik()` APIs):
-
-| Removed | Replacement example |
-| --- | --- |
-| `birthdateMatchesNik()` | `$model->nikBirthdateIs($model->birthdate)` |
-| `genderMatchesNik()` | `$model->nikGenderIs($model->gender)` |
-| `provinceMatchesNik()` | `$model->nikProvinceIs($model->province)` |
-| `regencyMatchesNik()` / `kabupatenMatchesNik()` / … | `$model->nikRegencyIs($model->regency)` or `nikKabupatenIs(...)`, `nikCityIs(...)`, `nikDistrictIs(...)` (all equivalent) |
-| `subdistrictMatchesNik()` / `kecamatanMatchesNik()` | `$model->nikSubdistrictIs($model->subdistrict)` or `nikKecamatanIs(...)` |
-| `ageMatchesNik()` | `$model->nikAgeIs((int) $model->age)` |
 
 #### Trait methods
 
