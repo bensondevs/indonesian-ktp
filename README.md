@@ -23,6 +23,7 @@ Validate Indonesian NIK (*Nomor Induk Kependudukan*) with structural checks and 
     - [Trait methods](#trait-methods)
   - [NIK column and accessors](#nik-column-and-accessors)
 - [Develop and test](#develop-and-test)
+- [Support](#support)
 - [Data source](#data-source)
 - [Security](#security)
 - [Versioning and support](#versioning-and-support)
@@ -525,6 +526,10 @@ protected function indonesianKtpReferenceDate(): ?CarbonInterface
 ```bash
 composer install && composer test
 ```
+
+## Support
+
+If this package saves you time, you can support ongoing maintenance on [GitHub Sponsors](https://github.com/sponsors/bensondevs) or [Trakteer](https://trakteer.id/bensonsimeon/tip).
 
 ## Data source
 
